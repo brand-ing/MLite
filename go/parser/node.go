@@ -1,5 +1,6 @@
 package parser
 
+
 type Node interface{}
 
 type LoadNode struct {
@@ -11,25 +12,60 @@ type SaveNode struct {
 }
 
 type TrainNode struct {
-	Model  string
-	Data   string
-	Target string
+    Model    string
+    Features []string
+    Target   string
+}
+
+type PredictNode struct {
+    Model string
+    Input []float64
+}
+
+
+
+type LetNode struct {
+	Variable string
+	Value    *ExpressionNode
 }
 
 type SetNode struct {
-    Variable string
-    Value    string
-}
-
-type LoopNode struct {
-    Count   string // Variable or literal number
-    Commands []Node   // Command to be executed
+	Variable string
+	Value    *ExpressionNode
 }
 
 type IfNode struct {
-    Left     string // Left-hand side of the comparison
-    Operator string // Comparison operator (e.g., "==")
-    Right    string // Right-hand side of the comparison
-    Commands  []Node   // Command to execute if the condition is true
+	Left     *ExpressionNode
+	Operator string
+	Right    *ExpressionNode
+	Commands []Node
 }
 
+type LoopNode struct {
+	Count    *ExpressionNode
+	Commands []Node
+}
+
+
+
+
+
+ 
+
+func (l *LetNode) TokenLiteral() string {
+    return l.Variable
+}
+
+// ExpressionNode represents an expression in the AST
+
+type ExpressionNode struct {
+    Type  string      // Type of the expression (e.g., "LITERAL", "IDENTIFIER")
+    Value interface{} // Value or variable name
+}
+
+
+
+type VarDeclaration struct {
+    Name  string          // Variable name
+    Value *ExpressionNode // The expression or value assigned to the variable
+}

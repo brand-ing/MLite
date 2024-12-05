@@ -48,6 +48,15 @@ func (l *Lexer) NextToken() token.Token {
 	case strings.HasPrefix(l.input[l.pos:], "if") && (l.pos+2 >= len(l.input) || !isLetterOrDigit(l.input[l.pos+2])):
 		l.pos += 2
 		return token.Token{Type: token.IF, Literal: "if"}
+	case strings.HasPrefix(l.input[l.pos:], "let") && (l.pos+3 >= len(l.input) || !isLetterOrDigit(l.input[l.pos+3])):
+		l.pos += 3
+		return token.Token{Type: token.LET, Literal: "let"}
+	case strings.HasPrefix(l.input[l.pos:], "::"):
+		l.pos += 2
+		return token.Token{Type: token.ASSIGN, Literal: "::"}
+	case l.input[l.pos] == ';':
+		l.pos++
+		return token.Token{Type: token.SEMICOLON, Literal: ";"}		
 	case strings.HasPrefix(l.input[l.pos:], "=="):
 		l.pos += 2
 		return token.Token{Type: token.EQ, Literal: "=="}
@@ -62,7 +71,10 @@ func (l *Lexer) NextToken() token.Token {
 		return token.Token{Type: token.GT, Literal: ">"}
 	case l.input[l.pos] == '<':
 		l.pos++
-		return token.Token{Type: token.LT, Literal: "<"}			
+		return token.Token{Type: token.LT, Literal: "<"}
+	case l.input[l.pos] == '=':
+		l.pos++
+		return token.Token{Type: token.ASSIGN, Literal: "="}				
 	case ch == '(':
 		l.pos++
 		return token.Token{Type: token.LPAREN, Literal: "("}

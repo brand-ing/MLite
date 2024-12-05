@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@codemirror/state": "^6.4.1"
+  }
+}
