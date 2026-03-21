@@ -58,9 +58,42 @@ func TestTrainNode(t *testing.T) {
     }
 
     trainNode, ok := nodes[0].(*TrainNode)
-    if !ok || trainNode.Model != "linear_regression" || trainNode.Data != "data" || trainNode.Target != "price" {
+    if !ok || trainNode.Model != "linear_regression" || trainNode.Features[0] != "data" || trainNode.Target != "price" {
         t.Fatalf("unexpected TrainNode: %+v", trainNode)
     }
+}
+
+func TestParsePredict(t *testing.T) {
+	tokens := []token.Token{
+		{Type: token.PREDICT, Literal: "predict"},
+		{Type: token.LPAREN, Literal: "("},
+		{Type: token.IDENTIFIER, Literal: "myModel"},
+		{Type: token.COMMA, Literal: ","},
+		{Type: token.LBRACKET, Literal: "["},
+		{Type: token.NUMBER, Literal: "1.5"},
+		{Type: token.COMMA, Literal: ","},
+		{Type: token.NUMBER, Literal: "2.0"},
+		{Type: token.RBRACKET, Literal: "]"},
+		{Type: token.RPAREN, Literal: ")"},
+		{Type: token.EOF, Literal: ""},
+	}
+
+	p := NewParser(tokens)
+	nodes := p.Parse()
+
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	predict, ok := nodes[0].(*PredictNode)
+	if !ok {
+		t.Fatalf("expected *PredictNode, got %T", nodes[0])
+	}
+	if predict.Model != "myModel" {
+		t.Errorf("expected model 'myModel', got '%s'", predict.Model)
+	}
+	if len(predict.Input) != 2 || predict.Input[0] != 1.5 || predict.Input[1] != 2.0 {
+		t.Errorf("unexpected input: %v", predict.Input)
+	}
 }
 
 func TestFullCommand(t *testing.T) {

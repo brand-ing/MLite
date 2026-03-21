@@ -44,19 +44,22 @@ func (l *Lexer) NextToken() token.Token {
 		return token.Token{Type: token.SET, Literal: "set"}
 	case strings.HasPrefix(l.input[l.pos:], "loop") && (l.pos+4 >= len(l.input) || !isLetterOrDigit(l.input[l.pos+4])):
 		l.pos += 4
-		return token.Token{Type: token.LOOP, Literal: "loop"}	
+		return token.Token{Type: token.LOOP, Literal: "loop"}
 	case strings.HasPrefix(l.input[l.pos:], "if") && (l.pos+2 >= len(l.input) || !isLetterOrDigit(l.input[l.pos+2])):
 		l.pos += 2
 		return token.Token{Type: token.IF, Literal: "if"}
 	case strings.HasPrefix(l.input[l.pos:], "let") && (l.pos+3 >= len(l.input) || !isLetterOrDigit(l.input[l.pos+3])):
 		l.pos += 3
 		return token.Token{Type: token.LET, Literal: "let"}
+	case strings.HasPrefix(l.input[l.pos:], "predict") && (l.pos+7 >= len(l.input) || !isLetterOrDigit(l.input[l.pos+7])):
+		l.pos += 7
+		return token.Token{Type: token.PREDICT, Literal: "predict"}
 	case strings.HasPrefix(l.input[l.pos:], "::"):
 		l.pos += 2
 		return token.Token{Type: token.ASSIGN, Literal: "::"}
 	case l.input[l.pos] == ';':
 		l.pos++
-		return token.Token{Type: token.SEMICOLON, Literal: ";"}		
+		return token.Token{Type: token.SEMICOLON, Literal: ";"}
 	case strings.HasPrefix(l.input[l.pos:], "=="):
 		l.pos += 2
 		return token.Token{Type: token.EQ, Literal: "=="}
@@ -74,7 +77,7 @@ func (l *Lexer) NextToken() token.Token {
 		return token.Token{Type: token.LT, Literal: "<"}
 	case l.input[l.pos] == '=':
 		l.pos++
-		return token.Token{Type: token.ASSIGN, Literal: "="}				
+		return token.Token{Type: token.ASSIGN, Literal: "="}
 	case ch == '(':
 		l.pos++
 		return token.Token{Type: token.LPAREN, Literal: "("}
@@ -86,7 +89,13 @@ func (l *Lexer) NextToken() token.Token {
 		return token.Token{Type: token.LBRACE, Literal: "{"}
 	case l.input[l.pos] == '}':
 		l.pos++
-		return token.Token{Type: token.RBRACE, Literal: "}"}	
+		return token.Token{Type: token.RBRACE, Literal: "}"}
+	case ch == '[':
+		l.pos++
+		return token.Token{Type: token.LBRACKET, Literal: "["}
+	case ch == ']':
+		l.pos++
+		return token.Token{Type: token.RBRACKET, Literal: "]"}
 	case ch == ',':
 		l.pos++
 		return token.Token{Type: token.COMMA, Literal: ","}

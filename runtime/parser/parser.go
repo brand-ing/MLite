@@ -1,36 +1,37 @@
 package parser
 
 import (
-    "fmt"
-    "mlite/token"
+	"fmt"
+	"mlite/token"
+	"strconv"
 )
 
 const (
-    LOWEST = 0
+	LOWEST = 0
 
-    LITERAL    = "LITERAL"
-    IDENTIFIER = "IDENTIFIER"
+	LITERAL    = "LITERAL"
+	IDENTIFIER = "IDENTIFIER"
 )
 
 type Parser struct {
-    tokens []token.Token
-    pos    int
+	tokens []token.Token
+	pos    int
 }
 
 // NewParser creates a new parser
 func NewParser(tokens []token.Token) *Parser {
-    return &Parser{tokens: tokens}
+	return &Parser{tokens: tokens}
 }
 
 func (p *Parser) parseExpression(precedence int) *ExpressionNode {
-    switch p.currentToken().Type {
-    case token.NUMBER:
-        return &ExpressionNode{Type: LITERAL, Value: p.expect(token.NUMBER).Literal}
-    case token.IDENTIFIER:
-        return &ExpressionNode{Type: IDENTIFIER, Value: p.expect(token.IDENTIFIER).Literal}
-    default:
-        panic(fmt.Sprintf("Unexpected token: %s", p.currentToken().Literal))
-    }
+	switch p.currentToken().Type {
+	case token.NUMBER:
+		return &ExpressionNode{Type: LITERAL, Value: p.expect(token.NUMBER).Literal}
+	case token.IDENTIFIER:
+		return &ExpressionNode{Type: IDENTIFIER, Value: p.expect(token.IDENTIFIER).Literal}
+	default:
+		panic(fmt.Sprintf("Unexpected token: %s", p.currentToken().Literal))
+	}
 }
 
 // Other methods...
@@ -61,6 +62,8 @@ func (p *Parser) Parse() []Node {
 			nodes = append(nodes, p.parseIf())
 		case token.LET:
 			nodes = append(nodes, p.parseLetStatement())
+		case token.PREDICT:
+			nodes = append(nodes, p.parsePredict())
 		default:
 			panic(fmt.Sprintf("Unexpected token: %s", tok.Type))
 		}
@@ -84,8 +87,6 @@ func (p *Parser) parseLetStatement() *LetNode {
 		Value:    value,
 	}
 }
-
-
 
 // Parse blocks enclosed in braces
 func (p *Parser) parseBlock() []Node {
@@ -112,6 +113,12 @@ func (p *Parser) ParseSingleCommand() Node {
 		return p.parseLoad()
 	case token.IF:
 		return p.parseIf()
+	case token.SET:
+		return p.parseSet()
+	case token.LOOP:
+		return p.parseLoop()
+	case token.PREDICT:
+		return p.parsePredict()
 	default:
 		panic(fmt.Sprintf("Unexpected command in block: %s", tok.Type))
 	}
@@ -139,41 +146,40 @@ func (p *Parser) parseSave() *SaveNode {
 
 // Parse "train" commands
 func (p *Parser) parseTrain() *TrainNode {
-    p.expect(token.TRAIN)
-    p.expect(token.LPAREN)
+	p.expect(token.TRAIN)
+	p.expect(token.LPAREN)
 
-    model := p.expect(token.IDENTIFIER).Literal
-    p.expect(token.COMMA)
+	model := p.expect(token.IDENTIFIER).Literal
+	p.expect(token.COMMA)
 
-    features := p.expect(token.IDENTIFIER).Literal
-    p.expect(token.COMMA)
+	features := p.expect(token.IDENTIFIER).Literal
+	p.expect(token.COMMA)
 
-    target := p.expect(token.IDENTIFIER).Literal
-    p.expect(token.RPAREN)
+	target := p.expect(token.IDENTIFIER).Literal
+	p.expect(token.RPAREN)
 
-    return &TrainNode{
-        Model:    model,
-        Features: features,
-        Target:   target,
-    }
+	return &TrainNode{
+		Model:    model,
+		Features: []string{features},
+		Target:   target,
+	}
 }
 
 func (p *Parser) parsePredict() *PredictNode {
-    p.expect(token.PREDICT)
-    p.expect(token.LPAREN)
+	p.expect(token.PREDICT)
+	p.expect(token.LPAREN)
 
-    model := p.expect(token.IDENTIFIER).Literal
-    p.expect(token.COMMA)
+	model := p.expect(token.IDENTIFIER).Literal
+	p.expect(token.COMMA)
 
-    input := parseArray(p) // Parse the input array
-    p.expect(token.RPAREN)
+	input := p.parseArray() // Parse the input array
+	p.expect(token.RPAREN)
 
-    return &PredictNode{
-        Model: model,
-        Input: input,
-    }
+	return &PredictNode{
+		Model: model,
+		Input: input,
+	}
 }
-
 
 // Parse "if" statements
 func (p *Parser) parseIf() *IfNode {
@@ -196,38 +202,56 @@ func (p *Parser) parseIf() *IfNode {
 	}
 }
 
+func (p *Parser) parseArray() []float64 {
+	p.expect(token.LBRACKET)
+	var elements []float64
+
+	for p.currentToken().Type != token.RBRACKET {
+		num := p.expect(token.NUMBER).Literal
+		val, err := strconv.ParseFloat(num, 64)
+		if err != nil {
+			panic(fmt.Sprintf("Invalid number in array: %s", num))
+		}
+		elements = append(elements, val)
+		if p.currentToken().Type == token.COMMA {
+			p.pos++
+		}
+	}
+
+	p.expect(token.RBRACKET)
+	return elements
+}
 
 // Parse "set" commands
 func (p *Parser) parseSet() *SetNode {
-    p.expect(token.SET)                       // Expect the "set" keyword
-    p.expect(token.LPAREN)                   // Expect an opening parenthesis
-    variable := p.expect(token.IDENTIFIER).Literal // Parse the variable name
+	p.expect(token.SET)                            // Expect the "set" keyword
+	p.expect(token.LPAREN)                         // Expect an opening parenthesis
+	variable := p.expect(token.IDENTIFIER).Literal // Parse the variable name
 
-    p.expect(token.COMMA)                    // Expect a comma
-    value := p.parseExpression(LOWEST)       // Parse the value as an ExpressionNode
+	p.expect(token.COMMA)              // Expect a comma
+	value := p.parseExpression(LOWEST) // Parse the value as an ExpressionNode
 
-    p.expect(token.RPAREN)                   // Expect a closing parenthesis
+	p.expect(token.RPAREN) // Expect a closing parenthesis
 
-    return &SetNode{
-        Variable: variable, // The variable name as a string
-        Value:    value,    // The value as an *ExpressionNode
-    }
+	return &SetNode{
+		Variable: variable, // The variable name as a string
+		Value:    value,    // The value as an *ExpressionNode
+	}
 }
-
 
 // Parse "loop" commands
 func (p *Parser) parseLoop() *LoopNode {
-    p.expect(token.LOOP)
-    p.expect(token.LPAREN)
-    count := p.parseExpression(LOWEST) // Parse the count as an ExpressionNode
+	p.expect(token.LOOP)
+	p.expect(token.LPAREN)
+	count := p.parseExpression(LOWEST) // Parse the count as an ExpressionNode
 
-    p.expect(token.RPAREN)
-    commands := p.parseBlock()
+	p.expect(token.RPAREN)
+	commands := p.parseBlock()
 
-    return &LoopNode{
-        Count:    count, // count is now *ExpressionNode
-        Commands: commands,
-    }
+	return &LoopNode{
+		Count:    count, // count is now *ExpressionNode
+		Commands: commands,
+	}
 }
 
 // Current token helper
