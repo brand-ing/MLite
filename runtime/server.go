@@ -1,127 +1,135 @@
 //go:build server
+// Build with: go build -tags server
 
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"mlite/lexer"
+	"mlite/parser"
+	"mlite/token"
+	"mlite/transpiler"
 	"net/http"
-	"os/exec"
-	// "strings"
-	"go/interpreter"
-	"go/lexer"
-	"go/parser"
 )
 
+// Request is the JSON body the workbench sends us.
+// The Code field contains raw MLite source code.
 type Request struct {
-	Code string `json:"code"` // Custom syntax from the debugger
+	Code string `json:"code"`
 }
 
+// Response is what we send back.
+// On success: Python is populated.
+// On failure: Error is populated and Python is empty.
 type Response struct {
-    Output    string                 `json:"output"`
-    Variables map[string]interface{} `json:"variables,omitempty"`
-    Error     string                 `json:"error,omitempty"`
+	Python string `json:"python,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
+// handleTranspile is the core endpoint.
+// It runs the full pipeline: MLite source → tokens → AST → Python source.
+func handleTranspile(w http.ResponseWriter, r *http.Request) {
+	// Step 0: only accept POST
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-var variables = make(map[string]interface{}) // Global map to store variables
+	// Step 1: decode the incoming JSON body
+	var req Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Code == "" {
+		writeError(w, "code field is empty", http.StatusBadRequest)
+		return
+	}
 
-func translateToPython(code string) string {
-    fmt.Println("Translating to Python:", code) // Log incoming custom syntax
-    return code // For now, just return the same code (adjust as needed)
+	// Step 2: Lex — turn the MLite source string into a token slice.
+	// The lexer produces one token at a time, so we loop until EOF.
+	lex := lexer.NewLexer(req.Code)
+	var tokens []token.Token
+	for {
+		tok := lex.NextToken()
+		tokens = append(tokens, tok)
+		if tok.Type == token.EOF {
+			break
+		}
+	}
+
+	// Step 3: Parse — turn the token slice into an AST ([]parser.Node).
+	// We use recover() here because the parser panics on syntax errors.
+	// A real production server would return a proper error message instead.
+	var nodes []parser.Node
+	var parseErr string
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				parseErr = fmt.Sprintf("syntax error: %v", r)
+			}
+		}()
+		p := parser.NewParser(tokens)
+		nodes = p.Parse()
+	}()
+
+	if parseErr != "" {
+		writeError(w, parseErr, http.StatusBadRequest)
+		return
+	}
+
+	// Step 4: Transpile — walk the AST and emit Python source code.
+	var pythonCode string
+	var transpileErr string
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				transpileErr = fmt.Sprintf("transpile error: %v", r)
+			}
+		}()
+		t := transpiler.NewTranspiler()
+		pythonCode = t.Transpile(nodes)
+	}()
+
+	if transpileErr != "" {
+		writeError(w, transpileErr, http.StatusInternalServerError)
+		return
+	}
+
+	// Step 5: return the Python source as JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(Response{Python: pythonCode})
 }
 
-
-func executePython(pythonCode string) string {
-    cmd := exec.Command("python3", "-c", pythonCode)
-    output, err := cmd.CombinedOutput()
-    if err != nil {
-        panic(fmt.Sprintf("Python execution failed: %s", err))
-    }
-    return string(output)
+// writeError sends a JSON error response with the given HTTP status code.
+func writeError(w http.ResponseWriter, msg string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(Response{Error: msg})
 }
 
-func checkPythonDependencies() {
-    cmd := exec.Command("python3", "-m", "pip", "list")
-    output, err := cmd.CombinedOutput()
-    if err != nil || !strings.Contains(string(output), "scikit-learn") {
-        panic("Required Python libraries are missing. Run: pip install -r requirements.txt")
-    }
-}
-
-
-func handleExecution(w http.ResponseWriter, r *http.Request) {
-    var req Request
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, "Invalid request", http.StatusBadRequest)
-        return
-    }
-
-    // Tokenize and parse the input code
-    lexer := lexer.NewLexer(req.Code)
-    parser := parser.NewParser(lexer)
-    program := parser.ParseProgram() // Generate the AST
-
-    // Execute the program (interprets the AST)
-    executeProgram(program)
-
-    // Return the updated variables and any output
-    resp := Response{
-        Variables: variables,
-        Output:    "Execution finished.", // Add output as needed
-    }
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(resp)
-}
-
-func handleStep(w http.ResponseWriter, r *http.Request) {
-    var req Request
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, "Invalid request", http.StatusBadRequest)
-        return
-    }
-
-    // Parse and step execute
-    lexer := lexer.NewLexer(req.Code)
-    parser := parser.NewParser(lexer)
-    nodes := parser.ParseProgram()
-
-    if req.CurrentNode >= len(nodes) {
-        http.Error(w, "No more nodes to execute", http.StatusBadRequest)
-        return
-    }
-
-    interpreter := NewInterpreter()
-    interpreter.StepRun(nodes[req.CurrentNode])
-
-    // Respond with the current state
-    resp := Response{
-        Variables: interpreter.variables,
-        Output:    fmt.Sprintf("Executed node %d", req.CurrentNode),
-    }
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(resp)
-}
-
-
+// enableCors wraps any handler and adds the headers that allow
+// the workbench (running on a different port) to call this API.
 func enableCors(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Access-Control-Allow-Origin", "*") // Allow all origins
-        w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-        w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-        if r.Method == http.MethodOptions {
-            w.WriteHeader(http.StatusOK) // Handle preflight request
-            return
-        }
-        next.ServeHTTP(w, r)
-    })
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		// OPTIONS is a preflight check browsers send before the real request
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func main() {
-    mux := http.NewServeMux()
-    mux.HandleFunc("/execute", handleExecution)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/transpile", handleTranspile)
 
-    fmt.Println("Interpreter server running on http://localhost:8080")
-    http.ListenAndServe(":8080", enableCors(mux))
+	fmt.Println("MLite server running on http://localhost:8080")
+	fmt.Println("POST /transpile  — send MLite code, receive Python")
+	http.ListenAndServe(":8080", enableCors(mux))
 }
