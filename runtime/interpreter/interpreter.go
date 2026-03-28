@@ -66,10 +66,6 @@ func (i *Interpreter) StepRun(node parser.Node) {
 // Run executes the parsed nodes
 func (i *Interpreter) Run(nodes []parser.Node) {
 	for _, node := range nodes {
-		if contains(breakpoints, index) {
-            fmt.Printf("Paused at line %d due to breakpoint\n", index)
-            break
-        }
 		switch n := node.(type) {
 		case *parser.LetNode: // Handle "let" statements
 			value := evaluateExpression(n.Value, i.variables)
@@ -102,8 +98,8 @@ func (i *Interpreter) Run(nodes []parser.Node) {
 				"prediction = %s.predict([%v])\nprint(prediction)",
 				n.Model, n.Input,
 			)
-			result := executePython(pythonCode)
-			fmt.Printf("Prediction for input %v: %s\n", n.Input, result)
+			executePython(pythonCode)
+			fmt.Printf("Prediction for input %v\n", n.Input)
 		
 
 		case *parser.LoopNode:
