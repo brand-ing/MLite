@@ -114,7 +114,7 @@ func writeError(w http.ResponseWriter, msg string, status int) {
 func enableCors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		// OPTIONS is a preflight check browsers send before the real request
 		if r.Method == http.MethodOptions {
@@ -125,11 +125,25 @@ func enableCors(next http.Handler) http.Handler {
 	})
 }
 
+// handleHealth responds to GET /health so the UI can poll server status.
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"ok"}`))
+}
+
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/transpile", handleTranspile)
+	mux.HandleFunc("/health", handleHealth)
+	// Catch-all: any unknown route still gets CORS headers so the browser
+	// doesn't report a misleading "CORS header missing" error on 404s.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, "not found", http.StatusNotFound)
+	})
 
-	fmt.Println("MLite server running on http://localhost:8080")
+	fmt.Println("MLite server running on http://localhost:8081")
 	fmt.Println("POST /transpile  — send MLite code, receive Python")
-	http.ListenAndServe(":8080", enableCors(mux))
+	fmt.Println("GET  /health     — server status check")
+	http.ListenAndServe(":8081", enableCors(mux))
 }

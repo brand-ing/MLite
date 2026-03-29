@@ -27,7 +27,7 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
+    "start": "concurrently --kill-others-on-fail --names \"SERVER,UI\" --prefix-colors \"green,cyan\" \"node start-server.js\" \"react-scripts start\"",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
@@ -51,8 +51,8 @@
     ]
   },
   "devDependencies": {
+    "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "@types/react-syntax-highlighter": "^15.5.13",
-    "@babel/plugin-proposal-private-property-in-object": "^7.21.11"
-    
+    "concurrently": "^9.2.1"
   }
 }
