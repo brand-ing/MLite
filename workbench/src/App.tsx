@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { transpile } from "./utils/api";
 
 const SAMPLE_MLITE = `# MLITE Workflow v0.1
 # Iris classification example
@@ -72,7 +73,7 @@ with open("iris_model.pkl", "wb") as f:
     pickle.dump(model, f)
 `;
 
-const PIPELINE_STEPS = [
+const PIPELINE_STEPS: PipelineStep[] = [
   {
     id: 0,
     keyword: "LOAD",
@@ -192,14 +193,27 @@ const PIPELINE_STEPS = [
   },
 ];
 
-const STATUS_COLORS = {
+type StepStatus = "done" | "active" | "pending" | "error";
+
+interface PipelineStep {
+  id: number;
+  keyword: string;
+  label: string;
+  icon: string;
+  status: StepStatus;
+  lines: number[];
+  vars: Record<string, { type: string; shape: string; preview: string }>;
+  log: string[];
+}
+
+const STATUS_COLORS: Record<StepStatus, string> = {
   done: "#00ff9f",
   active: "#f0c040",
   pending: "#444",
   error: "#ff4444",
 };
 
-const STATUS_BG = {
+const STATUS_BG: Record<StepStatus, string> = {
   done: "rgba(0,255,159,0.08)",
   active: "rgba(240,192,64,0.12)",
   pending: "transparent",
@@ -213,7 +227,37 @@ export default function MLITEDebugger() {
   const [isRunning, setIsRunning] = useState(false);
   const [scanLine, setScanLine] = useState(0);
   const [glitch, setGlitch] = useState(false);
-  const logRef = useRef(null);
+  const [pythonOutput, setPythonOutput] = useState(PYTHON_OUTPUT);
+  const [transpileError, setTranspileError] = useState("");
+  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+  const [serverOnline, setServerOnline] = useState(false);
+  const logRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // TODO: When the server supports file uploads (Phase 2), POST the file
+  // to a /upload endpoint so the Go runtime can reference it during execution.
+  // For now we just capture the filename so MLite scripts can reference it.
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadedFile(file.name);
+  };
+
+  // Poll /health every 3 seconds so the status dot stays accurate.
+  // If the server goes down mid-session the dot turns red immediately.
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await fetch("http://localhost:8081/health");
+        setServerOnline(res.ok);
+      } catch {
+        setServerOnline(false);
+      }
+    };
+    check(); // run once immediately on mount
+    const interval = setInterval(check, 3000);
+    return () => clearInterval(interval); // cleanup on unmount
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -228,17 +272,29 @@ export default function MLITEDebugger() {
     }
   }, [activeStep]);
 
-  const handleRun = () => {
+  const handleRun = async () => {
     setIsRunning(true);
     setGlitch(true);
+    setTranspileError("");
     setTimeout(() => setGlitch(false), 300);
-    setTimeout(() => setIsRunning(false), 2000);
+
+    const result = await transpile(mliteCode);
+
+    if (result.error) {
+      setTranspileError(result.error);
+      setPythonOutput("");
+    } else {
+      setPythonOutput(result.python ?? "");
+      setActiveTab("python"); // auto-switch to PYTHON OUT tab to show result
+    }
+
+    setIsRunning(false);
   };
 
   const step = PIPELINE_STEPS[activeStep];
   const highlightedLines = step?.lines || [];
 
-  const getLineHighlight = (lineIdx) => {
+  const getLineHighlight = (lineIdx: number) => {
     if (highlightedLines.includes(lineIdx)) return "rgba(240,192,64,0.18)";
     return "transparent";
   };
@@ -296,6 +352,18 @@ export default function MLITEDebugger() {
             MLITE
           </span>
           <span style={{ color: "#334", fontSize: 12 }}>v0.1-debug</span>
+          <span
+            title={serverOnline ? "Server online" : "Server offline — run mlite_server.exe"}
+            style={{
+              display: "inline-block",
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: serverOnline ? "#00ff9f" : "#ff4444",
+              boxShadow: serverOnline ? "0 0 6px #00ff9f" : "0 0 6px #ff4444",
+              transition: "background 0.4s, box-shadow 0.4s",
+            }}
+          />
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -394,120 +462,61 @@ export default function MLITEDebugger() {
             <span>
               SOURCE <span style={{ color: "#334" }}>workflow.mlite</span>
             </span>
-            <span style={{ color: "#2a4a2a", fontSize: 10 }}>
-              {mliteLines.length} lines
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {/* Hidden file input — triggered by the button below */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                style={{ display: "none" }}
+                onChange={handleFileUpload}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                title="Upload a CSV dataset"
+                style={{
+                  padding: "2px 8px",
+                  background: "transparent",
+                  border: "1px solid #1a3a1a",
+                  color: uploadedFile ? "#00cc88" : "#445",
+                  cursor: "pointer",
+                  fontSize: 10,
+                  borderRadius: 3,
+                  letterSpacing: "0.08em",
+                }}
+              >
+                {uploadedFile ? `📂 ${uploadedFile}` : "+ DATA"}
+              </button>
+              <span style={{ color: "#2a4a2a", fontSize: 10 }}>
+                {mliteLines.length} lines
+              </span>
+            </div>
           </div>
-          <div
-            style={{
-              flex: 1,
-              overflowY: "auto",
-              overflowX: "hidden",
-              fontSize: 12,
-              lineHeight: "1.7",
-            }}
-          >
-            {mliteLines.map((line, i) => {
-              const isHighlighted = highlightedLines.includes(i);
-              const isComment = line.trim().startsWith("#");
-              const isKeyword =
-                /^(LOAD|TRANSFORM|SPLIT|TRAIN|EVALUATE|EXPORT|DROP|NORMALIZE|ENCODE|USING|ON|TYPE|FEATURES|TARGET|PARAMS|METRICS|FROM|INTO|AS|SEED)/.test(
-                  line.trim(),
-                );
-
-              let color = "#8896aa";
-              if (isComment) color = "#3d5a3d";
-              else if (isHighlighted) color = "#e8d88a";
-              else if (isKeyword) color = "#7ac";
-
-              const parts = line.split(
-                /(\b(?:LOAD|TRANSFORM|SPLIT|TRAIN|EVALUATE|EXPORT|DROP|NORMALIZE|ENCODE|USING|ON|TYPE|FEATURES|TARGET|PARAMS|METRICS|FROM|INTO|AS|SEED)\b)/g,
-              );
-
-              return (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    background: isHighlighted
-                      ? "rgba(240,192,64,0.1)"
-                      : "transparent",
-                    borderLeft: isHighlighted
-                      ? "2px solid #f0c040aa"
-                      : "2px solid transparent",
-                    transition: "background 0.2s",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 36,
-                      textAlign: "right",
-                      paddingRight: 12,
-                      color: isHighlighted ? "#f0c04066" : "#252835",
-                      userSelect: "none",
-                      flexShrink: 0,
-                      fontSize: 11,
-                      paddingTop: 1,
-                    }}
-                  >
-                    {i + 1}
-                  </span>
-                  <span
-                    style={{
-                      flex: 1,
-                      paddingRight: 12,
-                      whiteSpace: "pre",
-                      color: isComment ? "#3d5a3d" : color,
-                    }}
-                  >
-                    {isComment
-                      ? line
-                      : parts.map((part, pi) => {
-                          const kws = [
-                            "LOAD",
-                            "TRANSFORM",
-                            "SPLIT",
-                            "TRAIN",
-                            "EVALUATE",
-                            "EXPORT",
-                            "DROP",
-                            "NORMALIZE",
-                            "ENCODE",
-                            "USING",
-                            "ON",
-                            "TYPE",
-                            "FEATURES",
-                            "TARGET",
-                            "PARAMS",
-                            "METRICS",
-                            "FROM",
-                            "INTO",
-                            "AS",
-                            "SEED",
-                          ];
-                          if (kws.includes(part)) {
-                            return (
-                              <span
-                                key={pi}
-                                style={{ color: "#00cc88", fontWeight: "bold" }}
-                              >
-                                {part}
-                              </span>
-                            );
-                          }
-                          if (/"[^"]*"/.test(part)) {
-                            return (
-                              <span key={pi} style={{ color: "#e8a87a" }}>
-                                {part}
-                              </span>
-                            );
-                          }
-                          return <span key={pi}>{part}</span>;
-                        })}
-                  </span>
-                </div>
-              );
-            })}
+          {/* TODO: syntax highlighting inside the editor (Phase 2).
+              For now a plain textarea keeps the look and enables editing. */}
+          <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+            <textarea
+              value={mliteCode}
+              onChange={(e) => setMliteCode(e.target.value)}
+              spellCheck={false}
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                background: "#0a0a0f",
+                color: "#8896aa",
+                fontFamily: "'Courier New', 'Lucida Console', monospace",
+                fontSize: 12,
+                lineHeight: "1.7",
+                border: "none",
+                outline: "none",
+                resize: "none",
+                padding: "8px 12px",
+                boxSizing: "border-box",
+                caretColor: "#00ff9f",
+              }}
+            />
           </div>
         </div>
 
@@ -812,12 +821,16 @@ export default function MLITEDebugger() {
                   lineHeight: 1.7,
                 }}
               >
-                {PYTHON_OUTPUT.split("\n").map((line, i) => {
+                {transpileError && (
+                  <div style={{ color: "#ff4444", marginBottom: 12, whiteSpace: "pre" }}>
+                    {transpileError}
+                  </div>
+                )}
+                {pythonOutput.split("\n").map((line, i) => {
                   const isSectionComment = line.startsWith("# ---");
                   const isComment = line.startsWith("#");
                   const isImport =
                     line.startsWith("import") || line.startsWith("from");
-                  const isString = /"[^"]+"/.test(line);
 
                   let color = "#8896aa";
                   if (isSectionComment) color = "#00cc8888";
